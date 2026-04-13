@@ -320,7 +320,7 @@ function redrawLinesOnCanvas(context) {
 
     lineWidth = dynamicWidth;
 
-    context.fillStyle = 'black';
+    context.fillStyle = 'white';
     context.fillRect(0, 0, targetCanvas.width, targetCanvas.height);
 
     const format = document.getElementById('outputFormat').value;
