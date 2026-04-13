@@ -25,7 +25,8 @@ const translations = {
         grid4Tooltip: "Grid 4x4",
 
         clearBtn: "Clear All Lines",
-        downloadBtn: "Download Image"
+        downloadBtn: "Download Image",
+        panHint: "Drag the image to reposition it"
     },
     es: {
         mainTitle: "Dibujante de Líneas Guía",
@@ -49,7 +50,8 @@ const translations = {
         crossTooltip: "Cruz",
         grid4Tooltip: "Cuadrícula 4x4",
         clearBtn: "Borrar Todo",
-        downloadBtn: "Descargar Imagen"
+        downloadBtn: "Descargar Imagen",
+        panHint: "Arrastra la imagen para reposicionarla"
     }
     // Add 'fr' (French) here if desired
 };
@@ -98,12 +100,19 @@ let drawingStack = [];
 let customGridSpacing = 0;
 const InchToCm = 2.54;
 
+// Pan/drag state
+let imageOffsetNormX = 0; // Offset as fraction of canvas width
+let imageOffsetNormY = 0; // Offset as fraction of canvas height
+let isDragging = false;
+let dragStartX = 0, dragStartY = 0;
+let dragStartOffsetNormX = 0, dragStartOffsetNormY = 0;
+
 
 // =================================================================
 // [+] STEP 2: ATTACH ALL EVENT LISTENERS [+]
 // =================================================================
-document.getElementById('orientationPortrait').addEventListener('change', transformImageToFormat);
-document.getElementById('orientationLandscape').addEventListener('change', transformImageToFormat);
+document.getElementById('orientationPortrait').addEventListener('change', () => { imageOffsetNormX = 0; imageOffsetNormY = 0; transformImageToFormat(); });
+document.getElementById('orientationLandscape').addEventListener('change', () => { imageOffsetNormX = 0; imageOffsetNormY = 0; transformImageToFormat(); });
 document.getElementById('outputFormat').addEventListener('change', handleFormatChange);
 document.getElementById('upload').addEventListener('change', handleImageUpload);
 document.getElementById('drawCross').addEventListener('click', drawCross);
@@ -118,6 +127,13 @@ document.getElementById('drawGrid15').addEventListener('click', drawGrid15);
 document.getElementById('drawGrid31').addEventListener('click', drawGrid31);
 document.getElementById('clearLines').addEventListener('click', clearLines);
 document.getElementById('applyGridButton').addEventListener('click', applyGrid);
+
+canvas.addEventListener('mousedown', startDrag);
+document.addEventListener('mousemove', doDrag);
+document.addEventListener('mouseup', endDrag);
+canvas.addEventListener('touchstart', startDragTouch, { passive: true });
+document.addEventListener('touchmove', doDragTouch, { passive: false });
+document.addEventListener('touchend', endDrag);
 
 const langSelect = document.getElementById('languageSelect');
 if (langSelect) {
@@ -170,6 +186,94 @@ function calculateFitDimensions(image, canvas) {
     return { drawX, drawY, drawWidth, drawHeight };
 }
 
+/**
+ * Calculates the position and size to draw an image to "cover" a canvas
+ * (like CSS object-fit: cover). The image fills the canvas, some parts may be clipped.
+ * baseX/baseY represent the centered (default) position.
+ */
+function calculateCoverDimensions(image, canvas) {
+    const imageRatio = image.width / image.height;
+    const canvasRatio = canvas.width / canvas.height;
+    let drawWidth, drawHeight;
+
+    if (imageRatio > canvasRatio) {
+        // Image is wider → scale by height to fill vertically
+        drawHeight = canvas.height;
+        drawWidth = canvas.height * imageRatio;
+    } else {
+        // Image is taller → scale by width to fill horizontally
+        drawWidth = canvas.width;
+        drawHeight = canvas.width / imageRatio;
+    }
+
+    return {
+        drawWidth,
+        drawHeight,
+        baseX: (canvas.width - drawWidth) / 2,
+        baseY: (canvas.height - drawHeight) / 2,
+    };
+}
+
+function updateCanvasCursor() {
+    const format = document.getElementById('outputFormat').value;
+    const hasImage = !!img.src && img.complete;
+    canvas.style.cursor = (format !== 'original' && hasImage) ? 'grab' : 'default';
+}
+
+function getCanvasScale() {
+    const rect = canvas.getBoundingClientRect();
+    return { x: canvas.width / rect.width, y: canvas.height / rect.height };
+}
+
+function startDrag(e) {
+    if (document.getElementById('outputFormat').value === 'original' || !img.src) return;
+    isDragging = true;
+    const scale = getCanvasScale();
+    dragStartX = e.clientX * scale.x;
+    dragStartY = e.clientY * scale.y;
+    dragStartOffsetNormX = imageOffsetNormX;
+    dragStartOffsetNormY = imageOffsetNormY;
+    canvas.style.cursor = 'grabbing';
+}
+
+function doDrag(e) {
+    if (!isDragging) return;
+    const scale = getCanvasScale();
+    const dx = (e.clientX * scale.x) - dragStartX;
+    const dy = (e.clientY * scale.y) - dragStartY;
+    imageOffsetNormX = dragStartOffsetNormX + dx / canvas.width;
+    imageOffsetNormY = dragStartOffsetNormY + dy / canvas.height;
+    redrawLinesOnCanvas(ctx);
+}
+
+function endDrag() {
+    isDragging = false;
+    updateCanvasCursor();
+}
+
+function startDragTouch(e) {
+    if (document.getElementById('outputFormat').value === 'original' || !img.src) return;
+    const touch = e.touches[0];
+    isDragging = true;
+    const scale = getCanvasScale();
+    dragStartX = touch.clientX * scale.x;
+    dragStartY = touch.clientY * scale.y;
+    dragStartOffsetNormX = imageOffsetNormX;
+    dragStartOffsetNormY = imageOffsetNormY;
+}
+
+function doDragTouch(e) {
+    if (!isDragging) return;
+    e.preventDefault();
+    const touch = e.touches[0];
+    const scale = getCanvasScale();
+    const dx = (touch.clientX * scale.x) - dragStartX;
+    const dy = (touch.clientY * scale.y) - dragStartY;
+    imageOffsetNormX = dragStartOffsetNormX + dx / canvas.width;
+    imageOffsetNormY = dragStartOffsetNormY + dy / canvas.height;
+    redrawLinesOnCanvas(ctx);
+}
+
 function checkUserUploadedImage(){
     if (!img.src) {
         alert("Please upload an image first.");
@@ -218,8 +322,21 @@ function redrawLinesOnCanvas(context) {
 
     context.fillStyle = 'black';
     context.fillRect(0, 0, targetCanvas.width, targetCanvas.height);
-    const fit = calculateFitDimensions(img, targetCanvas);
-    context.drawImage(img, fit.drawX, fit.drawY, fit.drawWidth, fit.drawHeight);
+
+    const format = document.getElementById('outputFormat').value;
+    if (format === 'original') {
+        context.drawImage(img, 0, 0);
+    } else {
+        const cover = calculateCoverDimensions(img, targetCanvas);
+        const offsetX = imageOffsetNormX * targetCanvas.width;
+        const offsetY = imageOffsetNormY * targetCanvas.height;
+        const rawX = cover.baseX + offsetX;
+        const rawY = cover.baseY + offsetY;
+        // Clamp so the image always fills the canvas completely
+        const drawX = Math.min(0, Math.max(targetCanvas.width - cover.drawWidth, rawX));
+        const drawY = Math.min(0, Math.max(targetCanvas.height - cover.drawHeight, rawY));
+        context.drawImage(img, drawX, drawY, cover.drawWidth, cover.drawHeight);
+    }
 
     drawingStack.forEach(command => {
          if (command.type === 'grid') {
@@ -268,6 +385,9 @@ function handleFormatChange() {
     const format = document.getElementById('outputFormat').value;
     const orientationContainer = document.getElementById('orientationContainer');
 
+    imageOffsetNormX = 0;
+    imageOffsetNormY = 0;
+
     if (format === 'original') {
         orientationContainer.style.display = 'none';
     } else {
@@ -276,6 +396,9 @@ function handleFormatChange() {
         document.getElementById('orientationPortrait').checked = imageIsPortrait;
         document.getElementById('orientationLandscape').checked = !imageIsPortrait;
     }
+    updateCanvasCursor();
+    const panHint = document.getElementById('panHint');
+    if (panHint) panHint.style.display = (format !== 'original' && img.src) ? 'block' : 'none';
     transformImageToFormat();
 }
 
@@ -293,6 +416,9 @@ function handleImageUpload(event) {
             // Clear any previous state
             drawingStack = [];
             customGridSpacing = 0;
+            imageOffsetNormX = 0;
+            imageOffsetNormY = 0;
+            updateCanvasCursor();
             showDownloadLink();
 
             EXIF.getData(img, function() {
