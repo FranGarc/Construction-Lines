@@ -4,6 +4,7 @@
 const translations = {
     en: {
         mainTitle: "Reference Line Drawer",
+        langLabel: "Language",
         card1Title: "1. Image & Format",
         selectImg: "Select Image",
         outputSize: "Output Paper Size",
@@ -40,6 +41,7 @@ const translations = {
     },
     es: {
         mainTitle: "Dibujante de Líneas Guía",
+        langLabel: "Idioma",
         card1Title: "1. Imagen y Formato",
         selectImg: "Seleccionar Imagen",
         outputSize: "Tamaño del Papel",
