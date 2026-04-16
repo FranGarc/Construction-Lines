@@ -26,7 +26,17 @@ const translations = {
 
         clearBtn: "Clear All Lines",
         downloadBtn: "Download Image",
-        panHint: "Drag the image to reposition it"
+        panHint: "Drag the image to reposition it",
+        grayscaleBtn: "Convert to B&W",
+        colorBtn: "Revert to Color",
+        alertNoImage: "Please upload an image first.",
+        alertInvalidGrid: "Please enter a valid number for grid spacing in cm.",
+        uploadPrompt: "Upload an image to see its dimensions",
+        imgDimPx: "Original image dimensions",
+        imgDimCm: "Approximate size",
+        scrollToZoom: "Scroll to zoom · Drag to pan",
+        zoomMax: "max",
+        zoomResetTooltip: "Reset zoom"
     },
     es: {
         mainTitle: "Dibujante de Líneas Guía",
@@ -51,14 +61,29 @@ const translations = {
         grid4Tooltip: "Cuadrícula 4x4",
         clearBtn: "Borrar Todo",
         downloadBtn: "Descargar Imagen",
-        panHint: "Arrastra la imagen para reposicionarla"
+        panHint: "Arrastra la imagen para reposicionarla",
+        grayscaleBtn: "Pasar a B&N",
+        colorBtn: "Volver a Color",
+        alertNoImage: "Por favor, sube una imagen primero.",
+        alertInvalidGrid: "Por favor, introduce un número válido para el espaciado de la rejilla en cm.",
+        uploadPrompt: "Sube una imagen para ver sus dimensiones",
+        imgDimPx: "Dimensiones originales",
+        imgDimCm: "Tamaño aproximado",
+        scrollToZoom: "Rueda para zoom · Arrastrar para mover",
+        zoomMax: "máx",
+        zoomResetTooltip: "Restablecer zoom"
     }
     // Add 'fr' (French) here if desired
 };
 
 // =================================================================
-// [+] TRANSLATION FUNCTION [+]
+// [+] TRANSLATION HELPERS [+]
 // =================================================================
+function t(key) {
+    const lang = localStorage.getItem('gridToolLang') || 'en';
+    return (translations[lang] && translations[lang][key]) || translations['en'][key] || key;
+}
+
 function updateLanguage(lang) {
     // 1. Update text content (Labels, Headers, Buttons)
     document.querySelectorAll('[data-i18n]').forEach(element => {
@@ -100,6 +125,9 @@ let drawingStack = [];
 let customGridSpacing = 0;
 const InchToCm = 2.54;
 
+// Grayscale state
+let isGrayscale = false;
+
 // Pan/drag state
 let imageOffsetNormX = 0; // Offset as fraction of canvas width
 let imageOffsetNormY = 0; // Offset as fraction of canvas height
@@ -107,12 +135,18 @@ let isDragging = false;
 let dragStartX = 0, dragStartY = 0;
 let dragStartOffsetNormX = 0, dragStartOffsetNormY = 0;
 
+// Zoom state
+let zoomLevel = 1.0;
+let zoomCenterNormX = 0.5; // Zoom center as fraction of canvas dimensions
+let zoomCenterNormY = 0.5;
+const MIN_QUALITY_DPI = 150; // DPI floor below which zoom is capped
+
 
 // =================================================================
 // [+] STEP 2: ATTACH ALL EVENT LISTENERS [+]
 // =================================================================
-document.getElementById('orientationPortrait').addEventListener('change', () => { imageOffsetNormX = 0; imageOffsetNormY = 0; transformImageToFormat(); });
-document.getElementById('orientationLandscape').addEventListener('change', () => { imageOffsetNormX = 0; imageOffsetNormY = 0; transformImageToFormat(); });
+document.getElementById('orientationPortrait').addEventListener('change', () => { imageOffsetNormX = 0; imageOffsetNormY = 0; resetZoom(); transformImageToFormat(); });
+document.getElementById('orientationLandscape').addEventListener('change', () => { imageOffsetNormX = 0; imageOffsetNormY = 0; resetZoom(); transformImageToFormat(); });
 document.getElementById('outputFormat').addEventListener('change', handleFormatChange);
 document.getElementById('upload').addEventListener('change', handleImageUpload);
 document.getElementById('drawCross').addEventListener('click', drawCross);
@@ -127,6 +161,7 @@ document.getElementById('drawGrid15').addEventListener('click', drawGrid15);
 document.getElementById('drawGrid31').addEventListener('click', drawGrid31);
 document.getElementById('clearLines').addEventListener('click', clearLines);
 document.getElementById('applyGridButton').addEventListener('click', applyGrid);
+document.getElementById('toggleGrayscale').addEventListener('click', toggleGrayscale);
 
 canvas.addEventListener('mousedown', startDrag);
 document.addEventListener('mousemove', doDrag);
@@ -134,6 +169,10 @@ document.addEventListener('mouseup', endDrag);
 canvas.addEventListener('touchstart', startDragTouch, { passive: true });
 document.addEventListener('touchmove', doDragTouch, { passive: false });
 document.addEventListener('touchend', endDrag);
+canvas.addEventListener('wheel', handleWheel, { passive: false });
+document.getElementById('zoomIn').addEventListener('click', () => zoomBy(1.25));
+document.getElementById('zoomOut').addEventListener('click', () => zoomBy(1 / 1.25));
+document.getElementById('zoomReset').addEventListener('click', resetZoom);
 
 const langSelect = document.getElementById('languageSelect');
 if (langSelect) {
@@ -214,10 +253,124 @@ function calculateCoverDimensions(image, canvas) {
     };
 }
 
+function updateClearButton() {
+    const btn = document.getElementById('clearLines');
+    if (btn) btn.style.display = drawingStack.length > 0 ? 'block' : 'none';
+}
+
 function updateCanvasCursor() {
     const format = document.getElementById('outputFormat').value;
     const hasImage = !!img.src && img.complete;
-    canvas.style.cursor = (format !== 'original' && hasImage) ? 'grab' : 'default';
+    const canInteract = hasImage && (format !== 'original' || zoomLevel > 1);
+    canvas.style.cursor = canInteract ? 'grab' : 'default';
+}
+
+// --- Zoom helpers ---
+
+function getEffectiveDPI() {
+    if (!img.src || !img.complete) return 96;
+    const format = document.getElementById('outputFormat').value;
+    if (format === 'original') return canvas.dpi || 96;
+
+    const [wMm, hMm] = paperSizes.dimensions[format];
+    const orientation = document.querySelector('input[name="orientation"]:checked').value;
+    const paperWmm = orientation === 'landscape' ? Math.max(wMm, hMm) : Math.min(wMm, hMm);
+    const paperHmm = orientation === 'landscape' ? Math.min(wMm, hMm) : Math.max(wMm, hMm);
+    const imgRatio = img.width / img.height;
+    const paperRatio = paperWmm / paperHmm;
+
+    // In cover mode, the constraining axis determines effective DPI
+    if (imgRatio > paperRatio) {
+        // Height fills paper height
+        return img.height / (paperHmm / 10 / InchToCm);
+    } else {
+        // Width fills paper width
+        return img.width / (paperWmm / 10 / InchToCm);
+    }
+}
+
+function getMaxZoom() {
+    const effectiveDPI = getEffectiveDPI();
+    return Math.max(1, effectiveDPI / MIN_QUALITY_DPI);
+}
+
+function clampZoomCenter(zoom) {
+    const mx = 0.5 / zoom;
+    const my = 0.5 / zoom;
+    zoomCenterNormX = Math.max(mx, Math.min(1 - mx, zoomCenterNormX));
+    zoomCenterNormY = Math.max(my, Math.min(1 - my, zoomCenterNormY));
+}
+
+function resetZoom() {
+    zoomLevel = 1;
+    zoomCenterNormX = 0.5;
+    zoomCenterNormY = 0.5;
+    updateZoomDisplay();
+    updateCanvasCursor();
+}
+
+function zoomBy(factor) {
+    const maxZoom = getMaxZoom();
+    zoomLevel = Math.max(1, Math.min(maxZoom, zoomLevel * factor));
+    clampZoomCenter(zoomLevel);
+    updateZoomDisplay();
+    updateCanvasCursor();
+    redrawLinesOnCanvas(ctx);
+}
+
+function updateZoomDisplay() {
+    const controls = document.getElementById('zoomControls');
+    const hint = document.getElementById('scrollHint');
+    const maxZoom = getMaxZoom();
+    const visible = !!(img.src && img.complete && maxZoom > 1);
+    if (controls) controls.style.display = visible ? 'flex' : 'none';
+    if (hint) hint.style.display = visible ? 'block' : 'none';
+    if (!visible) return;
+    const display = document.getElementById('zoomDisplay');
+    const maxDisplay = document.getElementById('zoomMaxDisplay');
+    const zoomInBtn = document.getElementById('zoomIn');
+    const zoomOutBtn = document.getElementById('zoomOut');
+    if (display) display.textContent = `${zoomLevel.toFixed(1)}×`;
+    if (maxDisplay) maxDisplay.textContent = `/ ${maxZoom.toFixed(1)}× ${t('zoomMax')}`;
+    if (zoomInBtn) zoomInBtn.disabled = zoomLevel >= maxZoom - 0.01;
+    if (zoomOutBtn) zoomOutBtn.disabled = zoomLevel <= 1;
+}
+
+function handleWheel(e) {
+    e.preventDefault();
+    if (!img.src || !img.complete) return;
+    const maxZoom = getMaxZoom();
+    if (maxZoom <= 1) return;
+
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    const newZoom = Math.max(1, Math.min(maxZoom, zoomLevel * factor));
+    if (newZoom === zoomLevel) return;
+
+    // Compute the canvas-pixel coordinate under the mouse
+    const rect = canvas.getBoundingClientRect();
+    const cssScale = getCanvasScale();
+    const mx = (e.clientX - rect.left) * cssScale.x;
+    const my = (e.clientY - rect.top) * cssScale.y;
+
+    // Keep the hovered canvas point fixed after zoom
+    // Formula: new_center = (mouse - canvas_point * newZoom) / (1 - newZoom)
+    if (newZoom === 1) {
+        zoomCenterNormX = 0.5;
+        zoomCenterNormY = 0.5;
+    } else {
+        const cx = zoomCenterNormX * canvas.width;
+        const cy = zoomCenterNormY * canvas.height;
+        const px = cx + (mx - cx) / zoomLevel; // canvas point under mouse
+        const py = cy + (my - cy) / zoomLevel;
+        zoomCenterNormX = (mx - px * newZoom) / ((1 - newZoom) * canvas.width);
+        zoomCenterNormY = (my - py * newZoom) / ((1 - newZoom) * canvas.height);
+    }
+
+    zoomLevel = newZoom;
+    clampZoomCenter(zoomLevel);
+    updateZoomDisplay();
+    updateCanvasCursor();
+    redrawLinesOnCanvas(ctx);
 }
 
 function getCanvasScale() {
@@ -226,13 +379,20 @@ function getCanvasScale() {
 }
 
 function startDrag(e) {
-    if (document.getElementById('outputFormat').value === 'original' || !img.src) return;
+    if (!img.src) return;
+    const format = document.getElementById('outputFormat').value;
+    if (format === 'original' && zoomLevel <= 1) return;
     isDragging = true;
     const scale = getCanvasScale();
     dragStartX = e.clientX * scale.x;
     dragStartY = e.clientY * scale.y;
-    dragStartOffsetNormX = imageOffsetNormX;
-    dragStartOffsetNormY = imageOffsetNormY;
+    if (zoomLevel > 1) {
+        dragStartOffsetNormX = zoomCenterNormX;
+        dragStartOffsetNormY = zoomCenterNormY;
+    } else {
+        dragStartOffsetNormX = imageOffsetNormX;
+        dragStartOffsetNormY = imageOffsetNormY;
+    }
     canvas.style.cursor = 'grabbing';
 }
 
@@ -241,8 +401,15 @@ function doDrag(e) {
     const scale = getCanvasScale();
     const dx = (e.clientX * scale.x) - dragStartX;
     const dy = (e.clientY * scale.y) - dragStartY;
-    imageOffsetNormX = dragStartOffsetNormX + dx / canvas.width;
-    imageOffsetNormY = dragStartOffsetNormY + dy / canvas.height;
+    if (zoomLevel > 1) {
+        // Drag moves the zoom viewport (opposite direction to drag)
+        zoomCenterNormX = dragStartOffsetNormX - dx / canvas.width;
+        zoomCenterNormY = dragStartOffsetNormY - dy / canvas.height;
+        clampZoomCenter(zoomLevel);
+    } else {
+        imageOffsetNormX = dragStartOffsetNormX + dx / canvas.width;
+        imageOffsetNormY = dragStartOffsetNormY + dy / canvas.height;
+    }
     redrawLinesOnCanvas(ctx);
 }
 
@@ -252,14 +419,21 @@ function endDrag() {
 }
 
 function startDragTouch(e) {
-    if (document.getElementById('outputFormat').value === 'original' || !img.src) return;
+    if (!img.src) return;
+    const format = document.getElementById('outputFormat').value;
+    if (format === 'original' && zoomLevel <= 1) return;
     const touch = e.touches[0];
     isDragging = true;
     const scale = getCanvasScale();
     dragStartX = touch.clientX * scale.x;
     dragStartY = touch.clientY * scale.y;
-    dragStartOffsetNormX = imageOffsetNormX;
-    dragStartOffsetNormY = imageOffsetNormY;
+    if (zoomLevel > 1) {
+        dragStartOffsetNormX = zoomCenterNormX;
+        dragStartOffsetNormY = zoomCenterNormY;
+    } else {
+        dragStartOffsetNormX = imageOffsetNormX;
+        dragStartOffsetNormY = imageOffsetNormY;
+    }
 }
 
 function doDragTouch(e) {
@@ -269,14 +443,20 @@ function doDragTouch(e) {
     const scale = getCanvasScale();
     const dx = (touch.clientX * scale.x) - dragStartX;
     const dy = (touch.clientY * scale.y) - dragStartY;
-    imageOffsetNormX = dragStartOffsetNormX + dx / canvas.width;
-    imageOffsetNormY = dragStartOffsetNormY + dy / canvas.height;
+    if (zoomLevel > 1) {
+        zoomCenterNormX = dragStartOffsetNormX - dx / canvas.width;
+        zoomCenterNormY = dragStartOffsetNormY - dy / canvas.height;
+        clampZoomCenter(zoomLevel);
+    } else {
+        imageOffsetNormX = dragStartOffsetNormX + dx / canvas.width;
+        imageOffsetNormY = dragStartOffsetNormY + dy / canvas.height;
+    }
     redrawLinesOnCanvas(ctx);
 }
 
 function checkUserUploadedImage(){
     if (!img.src) {
-        alert("Please upload an image first.");
+        alert(t('alertNoImage'));
         throw new Error("No image uploaded"); // Stop execution
     }
 }
@@ -288,8 +468,8 @@ function getImageDimensions(img, dpi) {
     const heightCm = (heightPx / dpi) * InchToCm;
 
     const dimensionsText = `
-        Original Image dimensions: ${widthPx}px x ${heightPx}px<br>
-        Approximate size: ${widthCm.toFixed(2)}cm x ${heightCm.toFixed(2)}cm (DPI: ${dpi})
+        ${t('imgDimPx')}: ${widthPx}px x ${heightPx}px<br>
+        ${t('imgDimCm')}: ${widthCm.toFixed(2)}cm x ${heightCm.toFixed(2)}cm (DPI: ${dpi})
     `;
     document.getElementById('imageDimensions').innerHTML = dimensionsText;
 }
@@ -311,7 +491,8 @@ function getPixelsPerCm(targetCanvas) {
 }
 
 // Master drawing function
-function redrawLinesOnCanvas(context) {
+// applyZoom: false when rendering to the export canvas (zoom is a preview-only feature)
+function redrawLinesOnCanvas(context, applyZoom = true) {
     const targetCanvas = context.canvas;
 
     // Calculate thickness: 1px minimum, or a ratio of the width
@@ -320,8 +501,22 @@ function redrawLinesOnCanvas(context) {
 
     lineWidth = dynamicWidth;
 
+    // Background always fills the full canvas (not affected by zoom)
     context.fillStyle = 'white';
     context.fillRect(0, 0, targetCanvas.width, targetCanvas.height);
+
+    // Apply zoom transform for preview (not for export)
+    const useZoom = applyZoom && zoomLevel > 1;
+    if (useZoom) {
+        const cx = zoomCenterNormX * targetCanvas.width;
+        const cy = zoomCenterNormY * targetCanvas.height;
+        context.save();
+        context.translate(cx, cy);
+        context.scale(zoomLevel, zoomLevel);
+        context.translate(-cx, -cy);
+    }
+
+    if (isGrayscale) context.filter = 'grayscale(1)';
 
     const format = document.getElementById('outputFormat').value;
     if (format === 'original') {
@@ -338,7 +533,10 @@ function redrawLinesOnCanvas(context) {
         context.drawImage(img, drawX, drawY, cover.drawWidth, cover.drawHeight);
     }
 
+    context.filter = 'none'; // Reset so reference lines keep their chosen color
+
     drawingStack.forEach(command => {
+
          if (command.type === 'grid') {
             grid(command.param, context, targetCanvas);
         } else if (command.type === 'diagonals') {
@@ -352,6 +550,8 @@ function redrawLinesOnCanvas(context) {
             drawGridOverlay(spacingPx, context, targetCanvas);
         }
     });
+
+    if (useZoom) context.restore();
 }
 
 // Main image transformation function
@@ -374,6 +574,19 @@ function transformImageToFormat() {
             newHeight = img.height;
             newWidth = img.height * formatAspectRatio;
         }
+
+        // Cap preview canvas height to what landscape would be for this image+format,
+        // so portrait never produces a taller canvas than landscape.
+        // (Export at 300 DPI is unaffected — it uses its own canvas.)
+        const landscapeHeight = imageAspectRatio > paperSizes.A_LANDSCAPE_RATIO
+            ? img.width / paperSizes.A_LANDSCAPE_RATIO
+            : img.height;
+        if (newHeight > landscapeHeight) {
+            const scale = landscapeHeight / newHeight;
+            newWidth = Math.round(newWidth * scale);
+            newHeight = Math.round(landscapeHeight);
+        }
+
         canvas.width = newWidth;
         canvas.height = newHeight;
     }
@@ -387,6 +600,7 @@ function handleFormatChange() {
 
     imageOffsetNormX = 0;
     imageOffsetNormY = 0;
+    zoomLevel = 1; zoomCenterNormX = 0.5; zoomCenterNormY = 0.5;
 
     if (format === 'original') {
         orientationContainer.style.display = 'none';
@@ -418,7 +632,12 @@ function handleImageUpload(event) {
             customGridSpacing = 0;
             imageOffsetNormX = 0;
             imageOffsetNormY = 0;
+            isGrayscale = false;
+            zoomLevel = 1; zoomCenterNormX = 0.5; zoomCenterNormY = 0.5;
+            const lang = localStorage.getItem('gridToolLang') || 'en';
+            document.getElementById('toggleGrayscale').textContent = translations[lang]['grayscaleBtn'];
             updateCanvasCursor();
+            updateClearButton();
             showDownloadLink();
 
             EXIF.getData(img, function() {
@@ -438,7 +657,7 @@ function applyGrid() {
     checkUserUploadedImage();
     const spacingCm = parseInt(document.getElementById('gridSpacing').value, 10);
     if (isNaN(spacingCm) || spacingCm <= 0) {
-        alert("Please enter a valid number for grid spacing in cm.");
+        alert(t('alertInvalidGrid'));
         return;
     }
     customGridSpacing = spacingCm;
@@ -512,12 +731,25 @@ function showDownloadLink() {
         }, 10);
     };
     downloadLink.style.display = 'block';
+    updateClearButton();
+    updateZoomDisplay();
 }
 
 function clearLines(){
     drawingStack = [];
     customGridSpacing = 0;
+    updateClearButton();
     transformImageToFormat();
+}
+
+function toggleGrayscale() {
+    checkUserUploadedImage();
+    isGrayscale = !isGrayscale;
+    const btn = document.getElementById('toggleGrayscale');
+    const lang = localStorage.getItem('gridToolLang') || 'en';
+    btn.textContent = translations[lang][isGrayscale ? 'colorBtn' : 'grayscaleBtn'];
+    redrawLinesOnCanvas(ctx);
+    showDownloadLink();
 }
 
 function drawCross(){
