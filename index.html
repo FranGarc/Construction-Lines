@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>GridMethod - Reference Line Drawer</title>
-    <!-- I'll add all the new CSS directly in the <style> tag for simplicity -->
     <style>
         /* --- General Body & Layout --- */
         body {
@@ -24,25 +23,26 @@
 
         .main-container {
             display: flex;
-            flex-wrap: wrap; /* Allows wrapping on smaller screens */
+            flex-wrap: wrap;
             gap: 24px;
             width: 100%;
-            max-width: 1600px;
+            max-width: 1800px;
             justify-content: center;
+            align-items: flex-start;
         }
 
         .controls-column {
             flex: 1;
-            min-width: 400px;
-            max-width: 500px;
+            min-width: 280px;
+            max-width: 400px;
             display: flex;
             flex-direction: column;
             gap: 24px;
         }
 
         .canvas-column {
-            flex: 3;
-            min-width: 60%;
+            flex: 2;
+            min-width: 0; /* Allows flex to shrink the column below content size */
             display: flex;
             flex-direction: column;
             align-items: center;
@@ -50,8 +50,10 @@
 
         canvas {
             border: 1px solid #ccc;
-            max-width: 100%; /* Makes canvas responsive */
-            height: auto;   /* Maintain aspect ratio */
+            max-width: 100%;
+            max-height: 80vh;
+            width: auto;
+            height: auto;
             background-color: white;
         }
 
@@ -93,8 +95,8 @@
         /* --- Button & Input Styling --- */
         .button, select {
             width: 100%;
-            padding: 12px;
-            font-size: 1rem;
+            padding: 14px;
+            font-size: 1.05rem;
             border-radius: 6px;
             border: 1px solid #ccc;
             background-color: #007bff;
@@ -120,7 +122,7 @@
             background-color: #0056b3;
         }
 
-        #upload-label { /* Special styling for the file upload button */
+        #upload-label {
             background-color: #28a745;
         }
         #upload-label:hover {
@@ -128,7 +130,7 @@
         }
 
         input[type="file"] {
-            display: none; /* Hide the default file input */
+            display: none;
         }
 
         input[type="color"] {
@@ -141,8 +143,8 @@
         input[type="number"] {
             width: 100%;
             box-sizing: border-box;
-            padding: 10px;
-            font-size: 1rem;
+            padding: 14px;
+            font-size: 1.05rem;
             border-radius: 6px;
             border: 1px solid #ccc;
         }
@@ -176,35 +178,58 @@
             border: 1px solid #ccc;
             border-radius: 6px;
             overflow: hidden;
-            /* This ensures the button group stays below the label */
             width: 100%;
             margin-top: 5px;
         }
         .orientation-group label {
             flex: 1;
             text-align: center;
-            /* Changed from 10px 0 to 10px 15px to give letters room */
             padding: 10px 15px;
             cursor: pointer;
             background-color: #f8f9fa;
             transition: background-color 0.2s;
             margin: 0;
-            /* Prevents text from touching edges on small widths */
             white-space: nowrap;
         }
         .orientation-group input[type="radio"] {
-            display: none; /* Hide the actual radio button */
+            display: none;
         }
         .orientation-group input[type="radio"]:checked + label {
             background-color: #007bff;
             color: white;
         }
 
-        /* --- Button Padding & Size Boost --- */
-        .button, select, input[type="number"] {
-            padding: 14px; /* Chunkier, easier to click */
-            font-size: 1.05rem;
+        /* --- Clear button (standalone, outside cards) --- */
+        #clearLines {
+            background-color: #dc3545;
+            margin-top: 8px;
         }
+        #clearLines:hover {
+            background-color: #b02a37;
+        }
+
+        /* --- Zoom controls --- */
+        #zoomControls {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .zoom-btn {
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            background: white;
+            color: #333;
+            font-size: 1.1rem;
+            line-height: 1;
+            cursor: pointer;
+            transition: background-color 0.15s;
+        }
+        .zoom-btn:hover:not(:disabled) { background-color: #e9ecef; }
+        .zoom-btn:disabled { opacity: 0.35; cursor: default; }
 
     </style>
 </head>
@@ -213,20 +238,21 @@
 <h1 data-i18n="mainTitle">Reference Line Drawer</h1>
 
 <div class="main-container">
-    <!-- ===== LEFT COLUMN: All Controls ===== -->
+
+    <!-- ===== LEFT COLUMN: Image & Format + Finalize ===== -->
     <div class="controls-column">
 
         <div class="form-group">
             <label>Language / Idioma</label>
-            <select id="languageSelect" autocomplete="off">
+            <  select id="languageSelect" autocomplete="off">
                 <option value="en">English</option>
                 <option value="es">Español</option>
-
             </select>
         </div>
+
         <!-- Card 1: File & Format -->
         <div class="control-card">
-            <h2 data-i18n="card1Title">1. Image & Format</h2>
+            <h2 data-i18n="card1Title">1. Image &amp; Format</h2>
             <div class="form-group">
                 <label for="upload" id="upload-label" class="button" data-i18n="selectImg">Select Image</label>
                 <input type="file" id="upload" accept="image/*"/>
@@ -242,16 +268,44 @@
                     <option value="A1">A1</option>
                 </select>
             </div>
-            <div class="form-group" id="orientationContainer" style="display:none; flex-direction: column;"><label data-i18n="orientation">Orientation</label>
+            <div class="form-group" id="orientationContainer" style="display:none; flex-direction: column;">
+                <label data-i18n="orientation">Orientation</label>
                 <div class="orientation-group">
                     <input type="radio" id="orientationPortrait" name="orientation" value="portrait" checked>
                     <label for="orientationPortrait" data-i18n="portrait">Portrait</label>
-
                     <input type="radio" id="orientationLandscape" name="orientation" value="landscape">
                     <label for="orientationLandscape" data-i18n="landscape">Landscape</label>
                 </div>
             </div>
         </div>
+
+        <!-- Card 4: Finalize -->
+        <div class="control-card">
+            <h2 data-i18n="card4Title">4. Finalize &amp; Download</h2>
+            <button class="button" id="toggleGrayscale" style="background-color: #6c757d;" data-i18n="grayscaleBtn">Convert to B&amp;W</button>
+            <br>
+            <a class="button" id="downloadLink" download="modified-image.png" style="display:none; background-color: #17a2b8; margin-top: 8px;" data-i18n="downloadBtn">Download Image</a>
+        </div>
+
+    </div>
+
+    <!-- ===== CENTER COLUMN: Canvas & Info ===== -->
+    <div class="canvas-column">
+        <div id="imageDimensions" data-i18n="uploadPrompt">Upload an image to see its dimensions</div>
+        <div id="panHint" style="display:none; font-size:0.85rem; color:#888; margin-bottom:8px;" data-i18n="panHint">Drag the image to reposition it</div>
+        <canvas id="canvas" style="display:none;"></canvas>
+        <div id="zoomControls">
+            <button class="zoom-btn" id="zoomOut" disabled title="Zoom out">−</button>
+            <span id="zoomDisplay" style="font-size:0.9rem; font-weight:600; min-width:38px; text-align:center;">1.0×</span>
+            <button class="zoom-btn" id="zoomIn" title="Zoom in">+</button>
+            <button class="zoom-btn" id="zoomReset" style="font-size:0.85rem;" data-i18n-title="zoomResetTooltip" title="Reset zoom">↺</button>
+            <span id="zoomMaxDisplay" style="font-size:0.8rem; color:#888;"></span>
+        </div>
+        <div id="scrollHint" style="display:none; font-size:0.8rem; color:#bbb; margin-top:4px;" data-i18n="scrollToZoom">Scroll to zoom · Drag to pan</div>
+    </div>
+
+    <!-- ===== RIGHT COLUMN: Reference Lines + Custom Grid + Clear ===== -->
+    <div class="controls-column">
 
         <!-- Card 2: Line Overlays -->
         <div class="control-card">
@@ -260,21 +314,19 @@
                 <label for="lineColor" data-i18n="lineColor">Line Color</label>
                 <input type="color" id="lineColor" value="#ff0000">
             </div>
-            <label data-i18n="presets">Preset Diamonds & Grids </label>
+            <label data-i18n="presets">Preset Diamonds &amp; Grids</label>
             <div class="grid-button-container">
-                <input type="image" class="grid-button" src="img/diagonals.png" id="drawDiagonal" title="Diagonals" data-i18n="diagTooltip"/>
+                <input type="image" class="grid-button" src="img/diagonals.png" id="drawDiagonal" title="Diagonals" data-i18n-title="diagTooltip"/>
                 <input type="image" class="grid-button" src="img/diamond.png" id="drawDiamond1" title="Diamond (2)"/>
                 <input type="image" class="grid-button" src="img/diamond4.png" id="drawDiamond2" title="Diamond (4)"/>
                 <input type="image" class="grid-button" src="img/diamond8.png" id="drawDiamond3" title="Diamond (8)"/>
                 <input type="image" class="grid-button" src="img/diamond16.png" id="drawDiamond4" title="Diamond (16)"/>
-
                 <input type="image" class="grid-button" src="img/cross.png" id="drawCross" title="Cross" data-i18n-title="crossTooltip"/>
                 <input type="image" class="grid-button" src="img/grid4.png" id="drawGrid3" title="Grid 4x4"/>
                 <input type="image" class="grid-button" src="img/grid8.png" id="drawGrid7" title="Grid 8x8"/>
                 <input type="image" class="grid-button" src="img/grid16.png" id="drawGrid15" title="Grid 16x16"/>
                 <input type="image" class="grid-button" src="img/grid32.png" id="drawGrid31" title="Grid 32x32"/>
             </div>
-
         </div>
 
         <!-- Card 3: Custom Grid -->
@@ -287,25 +339,13 @@
             <button class="button" id="applyGridButton" data-i18n="applyCustomGrid">Apply Custom Grid</button>
         </div>
 
-        <!-- Card 4: Finalize -->
-        <div class="control-card">
-            <h2 data-i18n="card4Title">4. Finalize & Download</h2>
-            <button class="button" id="clearLines" style="background-color: #dc3545;" data-i18n="clearBtn">Clear All Lines</button>
-            <br>
-            <a class="button" id="downloadLink" download="modified-image.png" style="display:none; background-color: #17a2b8;" data-i18n="downloadBtn">Download Image</a>
-        </div>
+        <!-- Clear button: only visible when grids are active -->
+        <button class="button" id="clearLines" style="display:none;" data-i18n="clearBtn">Clear All Lines</button>
 
     </div>
 
-    <!-- ===== RIGHT COLUMN: Canvas & Info ===== -->
-    <div class="canvas-column">
-        <div id="imageDimensions">Upload an image to see its dimensions</div>
-        <div id="panHint" style="display:none; font-size:0.85rem; color:#888; margin-bottom:8px;" data-i18n="panHint">Drag the image to reposition it</div>
-        <canvas id="canvas" style="display:none;"></canvas>
-    </div>
 </div>
 
-<!-- Scripts remain unchanged -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exif-js/2.3.0/exif.min.js"></script>
 <script src="script.js"></script>
 </body>
