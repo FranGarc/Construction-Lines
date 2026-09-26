@@ -16,6 +16,7 @@ class AppState {
         this.imageDpi = CONFIG.DEFAULT_DPI;
         this.outputFormat = 'original';
         this.orientation = 'portrait';
+        this.fitMode = 'cover';
         this.lineColor = CONFIG.DEFAULT_LINE_COLOR;
         this.drawingStack = [];
         this.customGridSpacing = 0;
@@ -43,6 +44,7 @@ class AppState {
         this.imageDpi = dpi || CONFIG.DEFAULT_DPI;
         this.outputFormat = 'original';
         this.orientation = image.width < image.height ? 'portrait' : 'landscape';
+        this.fitMode = 'cover';
         this.drawingStack = [];
         this.customGridSpacing = 0;
         this.isGrayscale = false;
@@ -71,6 +73,14 @@ class AppState {
         this.imageOffsetNormY = 0;
         this.resetZoom(false);
         this.notify('orientationChanged');
+    }
+
+    setFitMode(fitMode) {
+        this.fitMode = fitMode;
+        this.imageOffsetNormX = 0;
+        this.imageOffsetNormY = 0;
+        this.resetZoom(false);
+        this.notify('fitModeChanged');
     }
 
     setLineColor(color) {

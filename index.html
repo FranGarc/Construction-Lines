@@ -52,6 +52,15 @@
                     <label for="orientationLandscape" data-i18n="landscape">Landscape</label>
                 </div>
             </div>
+            <div class="form-group hidden" id="fitModeContainer">
+                <label data-i18n="fitLabel">Image Fitting</label>
+                <div class="orientation-group" role="radiogroup" aria-label="Image Fitting Mode">
+                    <input type="radio" id="fitModeFit" name="fitMode" value="fit">
+                    <label for="fitModeFit" data-i18n="fitOption">Fit (Save Ink)</label>
+                    <input type="radio" id="fitModeCover" name="fitMode" value="cover" checked>
+                    <label for="fitModeCover" data-i18n="coverOption">Fill Paper (Cover)</label>
+                </div>
+            </div>
         </article>
 
         <!-- Card 4: Finalize -->

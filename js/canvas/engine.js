@@ -31,6 +31,27 @@ export function calculateCoverDimensions(imgWidth, imgHeight, canvasWidth, canva
     };
 }
 
+export function calculateFitDimensions(imgWidth, imgHeight, canvasWidth, canvasHeight) {
+    const imageRatio = imgWidth / imgHeight;
+    const canvasRatio = canvasWidth / canvasHeight;
+    let drawWidth, drawHeight;
+
+    if (imageRatio > canvasRatio) {
+        drawWidth = canvasWidth;
+        drawHeight = canvasWidth / imageRatio;
+    } else {
+        drawHeight = canvasHeight;
+        drawWidth = canvasHeight * imageRatio;
+    }
+
+    return {
+        drawWidth,
+        drawHeight,
+        baseX: (canvasWidth - drawWidth) / 2,
+        baseY: (canvasHeight - drawHeight) / 2
+    };
+}
+
 export function getPixelsPerCm(format, orientation, canvasLogicalWidth, imageDpi) {
     if (format === 'original') {
         return (imageDpi || CONFIG.DEFAULT_DPI) / CONFIG.INCH_TO_CM;
@@ -127,6 +148,7 @@ export function renderCanvas(ctx, canvas, stateData, options = { isPreview: true
         imageDpi,
         outputFormat,
         orientation,
+        fitMode = 'cover',
         lineColor,
         drawingStack,
         isGrayscale,
@@ -150,8 +172,8 @@ export function renderCanvas(ctx, canvas, stateData, options = { isPreview: true
 
     const dynamicLineWidth = Math.max(3, logicalWidth / 500);
 
-    // Fill background
-    ctx.fillStyle = 'white';
+    // Fill background (pure white #FFFFFF)
+    ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, logicalWidth, logicalHeight);
 
     const useZoom = options.applyZoom && zoomLevel > 1;
@@ -170,6 +192,9 @@ export function renderCanvas(ctx, canvas, stateData, options = { isPreview: true
 
     if (outputFormat === 'original') {
         ctx.drawImage(image, 0, 0);
+    } else if (fitMode === 'fit') {
+        const fit = calculateFitDimensions(image.width, image.height, logicalWidth, logicalHeight);
+        ctx.drawImage(image, fit.baseX, fit.baseY, fit.drawWidth, fit.drawHeight);
     } else {
         const cover = calculateCoverDimensions(image.width, image.height, logicalWidth, logicalHeight);
         const offsetX = imageOffsetNormX * logicalWidth;

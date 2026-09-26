@@ -15,12 +15,12 @@ export function triggerDownload(url, filename) {
     document.body.removeChild(a);
 }
 
-export function generateFilename(format, orientation, customGridSpacing) {
+export function generateFilename(format, orientation, customGridSpacing, fitMode = 'cover') {
     let filename;
     if (format === 'original') {
         filename = 'original-image';
     } else {
-        filename = `image-${format}-${orientation}`;
+        filename = `image-${format}-${orientation}-${fitMode}`;
     }
     if (customGridSpacing > 0) {
         filename += `-${customGridSpacing}cm_grid`;
@@ -30,7 +30,7 @@ export function generateFilename(format, orientation, customGridSpacing) {
 }
 
 export function exportHighResImage(state) {
-    const filename = generateFilename(state.outputFormat, state.orientation, state.customGridSpacing);
+    const filename = generateFilename(state.outputFormat, state.orientation, state.customGridSpacing, state.fitMode);
 
     if (state.outputFormat === 'original') {
         const exportCanvas = document.createElement('canvas');
